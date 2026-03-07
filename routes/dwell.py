@@ -1,110 +1,112 @@
 """
 POST /dwell
 -----------
-The core pipeline endpoint. Called by the browser extension on every confirmed gaze dwell.
+V3 two-pipeline endpoint. Called by the browser extension on every confirmed gaze dwell.
 
-Pipeline:
-  1. Receive DwellEvent (screenshot + user_id + page context)
-  2. Gemini Call 1: identify product + extract taste signals
-  3. Backboard: update taste profile with new signals
-  4. Product sourcing: find candidates (SerpApi or hardcoded)
-  5. Gemini Call 2: select best match given updated profile
-  6. Cloudinary: transform product image
-  7. Return RecommendationCard to extension
+Three concurrent tasks:
+  Cat 1: Screenshot → SerpApi Lens → top visual match → "You looked at"
+  Cat 2: Read profile → compose query → SerpApi Shopping → "Based on your taste"
+  Gemini: Identify product → extract signals → write to Backboard (fire-and-forget)
+
+Cat 1 and Cat 2 return immediately. Gemini updates the profile for the *next* dwell.
 """
 
-from fastapi import APIRouter, HTTPException
-from models.schemas import DwellEvent, RecommendationCard
+import asyncio
+from fastapi import APIRouter
+from models.schemas import DwellEvent, DwellResponse, Cat1Product, ProductCandidate
 from services import gemini_service, backboard_service, sourcing_service, cloudinary_service
+from config.settings import settings
 
 router = APIRouter()
 
 
-@router.post("/", response_model=RecommendationCard)
+async def run_cat1(screenshot_b64: str) -> Cat1Product:
+    """
+    Cat 1 pipeline: find the exact product the user is looking at.
+    SerpApi Lens (live) or first hardcoded catalog item (fallback).
+    """
+    if settings.PRODUCT_SOURCING_MODE == "serpapi":
+        try:
+            product = await sourcing_service.source_cat1_serpapi(screenshot_b64)
+            product.image_url = await cloudinary_service.transform_product_image(product.image_url)
+            return product
+        except Exception as e:
+            print(f"[Cat1] SerpApi Lens failed: {e} — using hardcoded fallback")
+
+    return await sourcing_service.source_cat1_hardcoded()
+
+
+async def run_cat2(user_id: str) -> list[ProductCandidate]:
+    """
+    Cat 2 pipeline: find products matching the user's accumulated taste profile.
+    SerpApi Shopping (live) or profile-scored hardcoded catalog (fallback).
+    """
+    profile = await backboard_service.get_profile(user_id)
+
+    if settings.PRODUCT_SOURCING_MODE == "serpapi":
+        candidates = await sourcing_service.source_cat2_serpapi(profile)
+    else:
+        candidates = await sourcing_service.source_cat2_hardcoded(profile)
+
+    # Cloudinary transform each candidate image
+    if settings.CLOUDINARY_ENABLED:
+        for c in candidates:
+            try:
+                c.image_url = await cloudinary_service.transform_product_image(c.image_url)
+            except Exception:
+                pass  # Keep raw URL on failure
+
+    return candidates
+
+
+@router.post("/", response_model=DwellResponse)
 async def handle_dwell(event: DwellEvent):
     """
-    Full pipeline: dwell event in → recommendation card out.
+    V3 dwell handler — fires Cat 1, Cat 2, and Gemini concurrently.
+    Returns DwellResponse with current_product + taste_picks.
     """
     print(f"\n[Dwell] user={event.user_id} dwell={event.dwell_duration_ms}ms url={event.page_url}")
 
-    # ── Step 1: Gemini Vision — identify product ───────────────────────────
-    print("[Pipeline] Step 1: Gemini product identification")
-    try:
-        identified = await gemini_service.identify_product(
+    # Fire all three tasks concurrently
+    cat1_task = asyncio.create_task(run_cat1(event.screenshot_b64))
+    cat2_task = asyncio.create_task(run_cat2(event.user_id))
+    gemini_task = asyncio.create_task(
+        gemini_service.identify_and_update_profile(
             screenshot_b64=event.screenshot_b64,
             page_url=event.page_url,
             page_title=event.page_title or "",
-        )
-        print(f"[Pipeline] Identified: {identified.get('product_name')} ({identified.get('product_category')})")
-    except Exception as e:
-        print(f"[Pipeline] Gemini identification failed: {e} — using fallback signals")
-        identified = {
-            "product_name": "Unknown Product",
-            "product_category": "unknown",
-            "style_signals": [],
-            "color_signals": [],
-            "estimated_price_range": "unknown",
-            "brand_guess": "unknown",
-            "search_query": "trending products",
-        }
-
-    # ── Step 2: Backboard — update taste profile ───────────────────────────
-    print("[Pipeline] Step 2: Backboard profile update")
-    try:
-        updated_profile = await backboard_service.update_profile(
             user_id=event.user_id,
-            signals=identified,
         )
-        print(f"[Pipeline] Profile updated. Dwell count: {backboard_service.get_dwell_count(event.user_id)}")
-    except Exception as e:
-        # Non-fatal — use empty profile and continue
-        print(f"[Pipeline] Backboard update failed: {e} — using empty profile")
-        updated_profile = await backboard_service.get_profile(event.user_id)
-
-    # ── Step 3: Product sourcing ───────────────────────────────────────────
-    print("[Pipeline] Step 3: Product sourcing")
-    try:
-        candidates = await sourcing_service.source_products(
-            screenshot_b64=event.screenshot_b64,
-            signals=identified,
-        )
-        print(f"[Pipeline] {len(candidates)} candidates found via {candidates[0].source if candidates else 'none'}")
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Product sourcing failed: {e}")
-
-    if not candidates:
-        raise HTTPException(status_code=404, detail="No product candidates found")
-
-    # ── Step 4: Gemini — select best match ────────────────────────────────
-    print("[Pipeline] Step 4: Gemini match selection")
-    try:
-        best_product, match_reason = await gemini_service.select_best_match(
-            profile=updated_profile,
-            identified_product=identified,
-            candidates=candidates,
-        )
-        print(f"[Pipeline] Best match: {best_product.name} — {match_reason}")
-    except Exception as e:
-        # Fallback: just take first candidate
-        print(f"[Pipeline] Gemini selection failed: {e} — using first candidate")
-        best_product = candidates[0]
-        match_reason = "Matched to your recent interests."
-
-    # ── Step 5: Cloudinary image transform ────────────────────────────────
-    print("[Pipeline] Step 5: Cloudinary transform")
-    transformed_image_url = await cloudinary_service.transform_product_image(
-        best_product.image_url
     )
-    best_product.image_url = transformed_image_url
 
-    # ── Step 6: Return card ────────────────────────────────────────────────
-    card = RecommendationCard(
+    # Gather all — return_exceptions=True so one failure doesn't kill the others
+    results = await asyncio.gather(cat1_task, cat2_task, gemini_task, return_exceptions=True)
+    current_product, taste_picks, gemini_signals = results
+
+    # Handle exceptions gracefully
+    if isinstance(current_product, Exception):
+        print(f"[Pipeline] Cat 1 failed: {current_product}")
+        current_product = None
+
+    if isinstance(taste_picks, Exception):
+        print(f"[Pipeline] Cat 2 failed: {taste_picks}")
+        taste_picks = []
+
+    if isinstance(gemini_signals, Exception):
+        print(f"[Pipeline] Gemini failed (non-blocking): {gemini_signals}")
+
+    # Read latest profile + dwell count
+    profile = await backboard_service.get_profile(event.user_id)
+    dwell_count = backboard_service.get_dwell_count(event.user_id)
+
+    response = DwellResponse(
         user_id=event.user_id,
-        product=best_product,
-        match_reason=match_reason,
-        profile_snapshot=updated_profile,
-        sourcing_mode=best_product.source,
+        current_product=current_product,
+        taste_picks=taste_picks,
+        profile_snapshot=profile,
+        dwell_count=dwell_count,
+        sourcing_mode=settings.PRODUCT_SOURCING_MODE,
     )
 
-    print(f"[Pipeline] Card ready: {card.product.name} @ {card.product.price}")
-    return card
+    print(f"[Pipeline] Done — cat1={'yes' if current_product else 'no'}, cat2={len(taste_picks)} picks, dwells={dwell_count}")
+    return response

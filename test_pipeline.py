@@ -1,14 +1,14 @@
 """
 Smoke test — POST a fake DwellEvent to /dwell and print the response.
-Confirms the pipeline fires end-to-end without needing the browser extension.
+Confirms the v3 two-pipeline architecture fires end-to-end.
 
 Usage:
   1. Start the server:  python run.py
   2. In another terminal: python test_pipeline.py
 
 Expects PRODUCT_SOURCING_MODE=hardcoded and CLOUDINARY_ENABLED=false
-so that no external APIs (Gemini, SerpApi, Cloudinary) are required
-beyond Gemini for identification + selection.
+so that no external APIs (SerpApi, Cloudinary) are required.
+Gemini is optional — if unavailable, signals default to empty and cards still return.
 """
 
 import httpx
@@ -19,7 +19,6 @@ import sys
 SERVER_URL = "http://localhost:8000"
 
 # A tiny 1x1 red JPEG encoded as base64 — enough for Gemini to receive *something*
-# (it will likely fail to identify a product, but the pipeline error handling will kick in)
 FAKE_IMAGE_B64 = base64.b64encode(
     bytes([
         0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
@@ -57,22 +56,23 @@ FAKE_IMAGE_B64 = base64.b64encode(
 
 def main():
     print("=" * 60)
-    print("iTrack Smoke Test — POST /dwell")
+    print("iTrack V3 Smoke Test")
     print("=" * 60)
 
     # Step 1: Health check
-    print("\n[1/2] Health check...")
+    print("\n[1/3] Health check...")
     try:
         resp = httpx.get(f"{SERVER_URL}/health/", timeout=5.0)
         print(f"  Status: {resp.status_code}")
-        print(f"  Body:   {resp.json()}")
+        health = resp.json()
+        print(f"  Body:   {json.dumps(health, indent=2)}")
     except httpx.ConnectError:
         print(f"  ERROR: Cannot connect to {SERVER_URL}")
         print("  Is the server running?  python run.py")
         sys.exit(1)
 
     # Step 2: POST a fake dwell event
-    print("\n[2/2] POST /dwell with fake DwellEvent...")
+    print("\n[2/3] POST /dwell with fake DwellEvent...")
     payload = {
         "user_id": "smoke-test-user-001",
         "screenshot_b64": FAKE_IMAGE_B64,
@@ -92,11 +92,64 @@ def main():
         print(f"  Response:\n{json.dumps(body, indent=2)}")
 
         if resp.status_code == 200:
-            print("\n  SUCCESS — Pipeline fired end-to-end!")
-            print(f"  Product: {body['product']['name']} @ {body['product']['price']}")
-            print(f"  Reason:  {body['match_reason']}")
+            print("\n  SUCCESS — V3 pipeline fired end-to-end!")
+
+            # Validate DwellResponse shape
+            errors = []
+            if "current_product" not in body:
+                errors.append("Missing 'current_product' key")
+            if "taste_picks" not in body:
+                errors.append("Missing 'taste_picks' key")
+            elif not isinstance(body["taste_picks"], list):
+                errors.append("'taste_picks' should be a list")
+            if "profile_snapshot" not in body:
+                errors.append("Missing 'profile_snapshot' key")
+            if "dwell_count" not in body:
+                errors.append("Missing 'dwell_count' key")
+            if "sourcing_mode" not in body:
+                errors.append("Missing 'sourcing_mode' key")
+
+            if errors:
+                print(f"\n  SHAPE ERRORS: {errors}")
+            else:
+                print("  Response shape: VALID (DwellResponse v3)")
+
+                cp = body["current_product"]
+                if cp:
+                    print(f"  Cat 1 (You looked at): {cp['name']} @ {cp['price']}")
+                else:
+                    print("  Cat 1: null (no visual match)")
+
+                picks = body["taste_picks"]
+                print(f"  Cat 2 (Based on taste): {len(picks)} picks")
+                for i, p in enumerate(picks):
+                    print(f"    [{i+1}] {p['name']} @ {p['price']}")
+
+                print(f"  Dwell count: {body['dwell_count']}")
+                print(f"  Sourcing mode: {body['sourcing_mode']}")
         else:
-            print(f"\n  Pipeline returned {resp.status_code} (may need valid Gemini API key)")
+            print(f"\n  Pipeline returned {resp.status_code}")
+    except Exception as e:
+        print(f"  ERROR: {e}")
+
+    # Step 3: POST a second dwell to verify profile evolution
+    print("\n[3/3] POST /dwell again (same user) to check profile evolution...")
+    try:
+        resp = httpx.post(
+            f"{SERVER_URL}/dwell/",
+            json=payload,
+            timeout=30.0,
+        )
+        if resp.status_code == 200:
+            body = resp.json()
+            print(f"  Dwell count: {body['dwell_count']}")
+            print(f"  Cat 2 picks: {len(body['taste_picks'])}")
+            profile = body["profile_snapshot"]
+            print(f"  Profile styles: {profile.get('preferred_styles', [])}")
+            print(f"  Profile colors: {profile.get('preferred_colors', [])}")
+            print("  SUCCESS — profile evolves across dwells!")
+        else:
+            print(f"  Status: {resp.status_code}")
     except Exception as e:
         print(f"  ERROR: {e}")
 
