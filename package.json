@@ -1,0 +1,23 @@
+{
+  "name": "itrack-backend",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "fastify": "^4.27.0",
+    "@fastify/cors": "^9.0.1",
+    "zod": "^3.23.8",
+    "@google/generative-ai": "^0.14.0",
+    "cloudinary": "^2.2.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "tsx": "^4.11.0",
+    "@types/node": "^20.12.0"
+  }
+}
