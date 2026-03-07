@@ -1,22 +1,26 @@
 """
 Product Sourcing Service
 ------------------------
-Two paths, toggled by settings.PRODUCT_SOURCING_MODE:
+Three sourcing paths:
 
-  "serpapi"   → Google Lens reverse image search via SerpApi
-  "hardcoded" → Local catalog in HARDCODED_CATALOG below
+  Cat 1 (visual match):
+    "serpapi"   → Google Lens reverse image search via SerpApi
+    "hardcoded" → First item from HARDCODED_CATALOG
 
-Both return List[ProductCandidate]. Gemini then selects the best match.
+  Cat 2 (taste-based):
+    "serpapi"   → Google Shopping keyword search via SerpApi
+    "hardcoded" → Profile-scored items from HARDCODED_CATALOG
+
+Both toggled by settings.PRODUCT_SOURCING_MODE.
 """
 
+import random
 import httpx
-from models.schemas import ProductCandidate
+from models.schemas import ProductCandidate, TasteProfile, Cat1Product
 from config.settings import settings
 
 
 # ── Hardcoded Catalog (Fallback) ──────────────────────────────────────────────
-# Add/swap products here. Keep 15-20 for variety across demo sessions.
-# Use real product images and URLs for a convincing demo.
 
 HARDCODED_CATALOG: list[dict] = [
     {
@@ -128,7 +132,7 @@ HARDCODED_CATALOG: list[dict] = [
 
 
 def _score_candidate(candidate: dict, signals: dict) -> int:
-    """Simple tag-matching score. Gemini does the real ranking — this just pre-filters."""
+    """Simple tag-matching score against Gemini-extracted signals."""
     score = 0
     tags = set(t.lower() for t in candidate.get("tags", []))
     for signal in signals.get("style_signals", []) + signals.get("color_signals", []):
@@ -142,21 +146,107 @@ def _score_candidate(candidate: dict, signals: dict) -> int:
     return score
 
 
-# ── SerpApi Path ──────────────────────────────────────────────────────────────
+def _score_candidate_from_profile(candidate: dict, profile: TasteProfile) -> int:
+    """Score a catalog item against a TasteProfile (used for Cat 2 hardcoded fallback)."""
+    score = 0
+    tags = set(t.lower() for t in candidate.get("tags", []))
+    for style in profile.preferred_styles:
+        if style.lower() in tags:
+            score += 1
+    for color in profile.preferred_colors:
+        if color.lower() in tags:
+            score += 1
+    for brand in profile.preferred_brands:
+        if brand.lower() in tags:
+            score += 3
+    for interest in profile.recent_interests:
+        if any(interest.lower() in t for t in tags):
+            score += 2
+    return score
 
-async def source_via_serpapi(screenshot_b64: str, search_query: str) -> list[ProductCandidate]:
+
+# ── Cat 1: Visual Match (SerpApi Google Lens) ────────────────────────────────
+
+async def source_cat1_serpapi(screenshot_b64: str) -> Cat1Product:
     """
-    Uses SerpApi Google Lens to find purchasable products from the viewport image.
-    Falls back to hardcoded catalog if SerpApi fails.
-    Docs: https://serpapi.com/google-lens-api
+    Uses SerpApi Google Lens to find the exact product from the viewport image.
+    Returns the top visual match as a Cat1Product.
     """
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            "https://serpapi.com/search",
+            params={
+                "engine": "google_lens",
+                "url": f"data:image/jpeg;base64,{screenshot_b64}",
+                "api_key": settings.SERPAPI_KEY,
+            },
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        for item in data.get("visual_matches", [])[:1]:
+            return Cat1Product(
+                name=item.get("title", "Unknown Product"),
+                price=item.get("price", {}).get("value", "See site"),
+                image_url=item.get("thumbnail", ""),
+                buy_url=item.get("link", "#"),
+                source="serpapi",
+            )
+
+    raise ValueError("No visual matches found via SerpApi Lens")
+
+
+async def source_cat1_hardcoded() -> Cat1Product:
+    """Fallback: return first catalog item as the Cat 1 visual match."""
+    c = HARDCODED_CATALOG[0]
+    return Cat1Product(
+        name=c["name"],
+        price=c["price"],
+        image_url=c["image_url"],
+        buy_url=c["buy_url"],
+        source="hardcoded",
+    )
+
+
+# ── Cat 2: Taste-Based (SerpApi Google Shopping) ─────────────────────────────
+
+def compose_query_from_profile(profile: TasteProfile) -> str:
+    """
+    Builds a natural-language shopping query from the user's taste profile.
+    Example output: "minimalist black sneakers Nike $50-$150"
+    Returns empty string if profile has no meaningful data.
+    """
+    parts = []
+    if profile.preferred_styles:
+        parts.append(profile.preferred_styles[0])
+    if profile.preferred_colors:
+        parts.append(profile.preferred_colors[0])
+    if profile.recent_interests:
+        parts.append(profile.recent_interests[0])
+    if profile.preferred_brands:
+        parts.append(profile.preferred_brands[0])
+    if profile.price_range and profile.price_range != "unknown":
+        parts.append(profile.price_range)
+    return " ".join(parts)
+
+
+async def source_cat2_serpapi(profile: TasteProfile) -> list[ProductCandidate]:
+    """
+    Uses SerpApi Google Shopping to find products matching the user's taste profile.
+    Falls back to hardcoded catalog on failure.
+    """
+    query = compose_query_from_profile(profile)
+    if not query:
+        return await source_cat2_hardcoded(profile)
+
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 "https://serpapi.com/search",
                 params={
-                    "engine": "google_lens",
-                    "url": f"data:image/jpeg;base64,{screenshot_b64}",
+                    "engine": "google_shopping",
+                    "q": query,
                     "api_key": settings.SERPAPI_KEY,
                 },
                 timeout=10.0,
@@ -165,10 +255,10 @@ async def source_via_serpapi(screenshot_b64: str, search_query: str) -> list[Pro
             data = resp.json()
 
             candidates = []
-            for item in data.get("visual_matches", [])[:5]:
+            for item in data.get("shopping_results", [])[:5]:
                 candidates.append(ProductCandidate(
                     name=item.get("title", "Unknown Product"),
-                    price=item.get("price", {}).get("value", "See site"),
+                    price=item.get("price", "See site"),
                     image_url=item.get("thumbnail", ""),
                     buy_url=item.get("link", "#"),
                     source="serpapi",
@@ -178,25 +268,33 @@ async def source_via_serpapi(screenshot_b64: str, search_query: str) -> list[Pro
                 return candidates
 
     except Exception as e:
-        print(f"[SerpApi] Failed: {e} — falling back to hardcoded catalog")
+        print(f"[SerpApi Shopping] Failed: {e} — falling back to hardcoded catalog")
 
-    # Fallback within serpapi mode if API fails
-    return await source_via_hardcoded({})
+    return await source_cat2_hardcoded(profile)
 
 
-# ── Hardcoded Catalog Path ────────────────────────────────────────────────────
-
-async def source_via_hardcoded(signals: dict) -> list[ProductCandidate]:
+async def source_cat2_hardcoded(profile: TasteProfile) -> list[ProductCandidate]:
     """
-    Scores the hardcoded catalog against Gemini's extracted signals,
-    returns top 5 candidates for Gemini to rank.
+    Scores the hardcoded catalog against the user's taste profile.
+    Returns top 3-5 candidates. If profile is empty, returns random 3.
     """
-    scored = sorted(
-        HARDCODED_CATALOG,
-        key=lambda c: _score_candidate(c, signals),
-        reverse=True,
+    has_profile = bool(
+        profile.preferred_styles
+        or profile.preferred_colors
+        or profile.preferred_brands
+        or profile.recent_interests
     )
-    top = scored[:5]
+
+    if has_profile:
+        scored = sorted(
+            HARDCODED_CATALOG,
+            key=lambda c: _score_candidate_from_profile(c, profile),
+            reverse=True,
+        )
+        top = scored[:5]
+    else:
+        top = random.sample(HARDCODED_CATALOG, min(3, len(HARDCODED_CATALOG)))
+
     return [
         ProductCandidate(
             name=c["name"],
@@ -207,22 +305,3 @@ async def source_via_hardcoded(signals: dict) -> list[ProductCandidate]:
         )
         for c in top
     ]
-
-
-# ── Public Interface ──────────────────────────────────────────────────────────
-
-async def source_products(
-    screenshot_b64: str,
-    signals: dict,
-) -> list[ProductCandidate]:
-    """
-    Entry point — routes to correct sourcing path based on feature flag.
-    Always returns a list of ProductCandidate for Gemini to rank.
-    """
-    mode = settings.PRODUCT_SOURCING_MODE
-    print(f"[Sourcing] Mode: {mode}")
-
-    if mode == "serpapi":
-        return await source_via_serpapi(screenshot_b64, signals.get("search_query", ""))
-    else:
-        return await source_via_hardcoded(signals)
