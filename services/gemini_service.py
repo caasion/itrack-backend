@@ -7,13 +7,14 @@ Called twice per dwell event:
   2. select_best_match()  — Given the taste profile, which sourced product fits best?
 """
 
+import asyncio
 import json
 import google.generativeai as genai
 from config.settings import settings
 from models.schemas import TasteProfile, ProductCandidate
 
 genai.configure(api_key=settings.GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")  # Flash: fast + cheap for demo
+model = genai.GenerativeModel(settings.GEMINI_MODEL)  # Configurable in .env
 
 
 # ── Call 1: Product Identification + Taste Signal Extraction ──────────────────
@@ -24,7 +25,7 @@ You are analyzing a screenshot from a social media feed (Instagram or TikTok).
 Identify the primary product visible and extract taste signals.
 Respond ONLY with valid JSON — no markdown, no explanation.
 
-{
+{{
   "product_name": "short descriptive name",
   "product_category": "e.g. sneakers, hoodie, water bottle",
   "style_signals": ["list", "of", "style", "descriptors"],
@@ -32,7 +33,7 @@ Respond ONLY with valid JSON — no markdown, no explanation.
   "estimated_price_range": "$XX-$XX or 'unknown'",
   "brand_guess": "brand name or 'unknown'",
   "search_query": "best search query to find this product to buy online"
-}
+}}
 
 Page URL for context: {page_url}
 Page title: {page_title}
@@ -47,10 +48,14 @@ async def identify_product(screenshot_b64: str, page_url: str, page_title: str) 
 
     prompt = IDENTIFY_PROMPT.format(page_url=page_url, page_title=page_title or "unknown")
 
-    response = model.generate_content([
-        {"mime_type": "image/jpeg", "data": screenshot_b64},
-        prompt,
-    ])
+    response = await asyncio.to_thread(
+        model.generate_content,
+        [
+            {"mime_type": "image/jpeg", "data": screenshot_b64},
+            prompt,
+        ],
+        request_options={"timeout": 30},
+    )
 
     raw = response.text.strip()
     # Strip markdown fences if Gemini wraps in ```json
@@ -77,10 +82,10 @@ Here are available products to recommend:
 Pick the single best match for this user. Consider their preferred styles, colors,
 brands, and price range. Respond ONLY with valid JSON — no markdown, no explanation.
 
-{
+{{
   "best_match_index": 0,
   "match_reason": "one concise sentence explaining why this fits their taste"
-}
+}}
 """
 
 async def select_best_match(
@@ -111,7 +116,11 @@ async def select_best_match(
         candidates_json=candidates_json,
     )
 
-    response = model.generate_content(prompt)
+    response = await asyncio.to_thread(
+        model.generate_content,
+        prompt,
+        request_options={"timeout": 30},
+    )
     raw = response.text.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
