@@ -2,12 +2,12 @@
 Backboard Service
 -----------------
 Reads and writes the per-user taste profile.
-Backboard is treated as a persistent key-value store keyed by user_id.
 
-If Backboard API details change at the hackathon, update:
-  - _get_profile_url()
-  - _set_profile_url()
-  - headers in _headers()
+NOTE: The official Backboard SDK (pip install backboard-sdk) exposes
+  client.add(user_id, content) / client.add_message(..., memory="Auto")
+for memory storage. The REST endpoints below are a best-effort guess;
+if they return errors the service falls back gracefully to an in-memory
+cache so the pipeline keeps working without remote persistence.
 """
 
 import httpx

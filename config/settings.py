@@ -10,6 +10,7 @@ from typing import Literal
 class Settings(BaseSettings):
     # --- API Keys ---
     GEMINI_API_KEY: str = "YOUR_GEMINI_API_KEY"
+    GEMINI_MODEL: str = "gemini-flash-latest"
     BACKBOARD_API_KEY: str = "YOUR_BACKBOARD_API_KEY"
     BACKBOARD_BASE_URL: str = "https://api.backboard.io"
     SERPAPI_KEY: str = "YOUR_SERPAPI_KEY"

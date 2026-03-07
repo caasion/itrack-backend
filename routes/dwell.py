@@ -37,7 +37,16 @@ async def handle_dwell(event: DwellEvent):
         )
         print(f"[Pipeline] Identified: {identified.get('product_name')} ({identified.get('product_category')})")
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Gemini identification failed: {e}")
+        print(f"[Pipeline] Gemini identification failed: {e} — using fallback signals")
+        identified = {
+            "product_name": "Unknown Product",
+            "product_category": "unknown",
+            "style_signals": [],
+            "color_signals": [],
+            "estimated_price_range": "unknown",
+            "brand_guess": "unknown",
+            "search_query": "trending products",
+        }
 
     # ── Step 2: Backboard — update taste profile ───────────────────────────
     print("[Pipeline] Step 2: Backboard profile update")
