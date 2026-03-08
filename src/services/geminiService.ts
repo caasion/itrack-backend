@@ -49,7 +49,7 @@ For style_signals and color_signals, extract short clean adjectives that describ
 
 Respond ONLY with valid JSON, no markdown, no explanation:
 {
-"product_name": string,
+  "product_name": string,
   "product_category": string,
   "style_signals": string[],
   "color_signals": string[],
@@ -97,6 +97,21 @@ const generateWithModelFallback = async (
     try {
       const model = genAI.getGenerativeModel({ model: modelName });
       const result = await model.generateContent(parts);
+
+      // Inspect the response before calling .text() — if the response was
+      // blocked by a safety filter the SDK sets finishReason to "SAFETY" and
+      // leaves candidate.content undefined, causing .text() to throw
+      // "Cannot read properties of undefined".
+      const candidate = result.response.candidates?.[0];
+      const finishReason = candidate?.finishReason ?? "UNKNOWN";
+      if (finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
+        const safetyRatings = JSON.stringify(candidate?.safetyRatings ?? []);
+        const promptFeedback = JSON.stringify(result.response.promptFeedback ?? {});
+        throw new Error(
+          `[Gemini] Response blocked or empty — finishReason=${finishReason} safetyRatings=${safetyRatings} promptFeedback=${promptFeedback}`,
+        );
+      }
+
       if (selectedModelName !== modelName) {
         console.log(`[Gemini] Using model: ${modelName}`);
       }
@@ -137,12 +152,28 @@ export const identifyAndUpdate = async (
     );
 
     const rawText = await generateWithModelFallback([imagePart, prompt]);
+    console.log("[Gemini] Raw response text:", rawText.slice(0, 500));
+
     const jsonText = stripMarkdownFences(rawText);
+    console.log("[Gemini] Stripped JSON text:", jsonText.slice(0, 500));
 
     const parsedJson: unknown = JSON.parse(jsonText);
-    signals = GeminiSignalsSchema.parse(parsedJson);
+    const raw = GeminiSignalsSchema.parse(parsedJson);
+
+    // Strip parenthetical qualifiers like "Black (frother)" → "Black"
+    // These leak context words into profile tags and ruin catalog matching.
+    const cleanSignal = (s: string) => s.replace(/\s*\([^)]*\)/g, "").trim();
+    signals = {
+      ...raw,
+      style_signals: raw.style_signals.map(cleanSignal).filter(Boolean),
+      color_signals: raw.color_signals.map(cleanSignal).filter(Boolean),
+    };
+    console.log("[Gemini] Parsed signals:", JSON.stringify(signals));
   } catch (error) {
-    console.warn("[Gemini] identifyAndUpdate failed", error);
+    const message = error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? (error.stack ?? "") : "";
+    console.warn("[Gemini] identifyAndUpdate failed:", message);
+    if (stack) console.warn("[Gemini] Stack:", stack.split("\n").slice(0, 4).join(" | "));
   }
 
   try {

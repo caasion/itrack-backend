@@ -17,17 +17,32 @@ const dwellRoutes: FastifyPluginAsync = async (fastify) => {
 
     fastify.log.info("[Pipeline] Fetching current profile for Cat2 input");
     const currentProfile = await backboardService.getProfile(event.user_id);
+    const preGeminiQuery = sourcingService.composeQueryFromProfile(currentProfile);
+    fastify.log.info(
+      {
+        userId: event.user_id,
+        preGeminiQuery,
+        profileSeed: {
+          preferred_styles: currentProfile.preferred_styles,
+          preferred_colors: currentProfile.preferred_colors,
+          recent_interests: currentProfile.recent_interests,
+          preferred_brands: currentProfile.preferred_brands,
+          price_range: currentProfile.price_range,
+        },
+      },
+      "[Pipeline] Cat2 pre-Gemini query context",
+    );
 
     fastify.log.info("[Pipeline] Running Cat1, Cat2, and Gemini concurrently");
     const cat1Task = sourcingService.sourceCat1(event.screenshot_b64);
     const cat2Task = sourcingService.sourceCat2(currentProfile).catch((error: unknown) => {
-      fastify.log.warn({ error }, "[Pipeline] Cat2 sourcing failed, using empty picks");
+      fastify.log.warn({ err: error }, "[Pipeline] Cat2 sourcing failed, using empty picks");
       return [];
     });
     const geminiTask = geminiService
       .identifyAndUpdate(event.screenshot_b64, event.user_id, event.page_url, event.page_title)
       .catch((error: unknown) => {
-        fastify.log.warn({ error }, "[Pipeline] Gemini identify/update failed");
+        fastify.log.warn({ err: error }, "[Pipeline] Gemini identify/update failed");
       });
 
     let cat1Product: ProductCandidate;
@@ -38,9 +53,19 @@ const dwellRoutes: FastifyPluginAsync = async (fastify) => {
         ([cat1, cat2, _gemini]) => [cat1, cat2],
       );
     } catch (error) {
-      fastify.log.error({ error }, "[Pipeline] Cat1 sourcing failed");
+      fastify.log.error({ err: error }, "[Pipeline] Cat1 sourcing failed");
       return reply.code(502).send({ message: "Cat1 sourcing failed" });
     }
+
+    fastify.log.info(
+      {
+        userId: event.user_id,
+        current_product_source: cat1Product.source,
+        taste_picks_sources: cat2Picks.map((pick) => pick.source),
+        hardcoded_taste_pick_count: cat2Picks.filter((pick) => pick.source === "hardcoded").length,
+      },
+      "[Pipeline] Sourcing source summary",
+    );
 
     fastify.log.info("[Pipeline] Transforming product images in parallel");
     const allProducts = [cat1Product, ...cat2Picks];
@@ -53,6 +78,14 @@ const dwellRoutes: FastifyPluginAsync = async (fastify) => {
 
     fastify.log.info("[Pipeline] Re-fetching profile after Gemini update");
     const updatedProfile = await backboardService.getProfile(event.user_id);
+    const postGeminiQuery = sourcingService.composeQueryFromProfile(updatedProfile);
+    fastify.log.info(
+      {
+        userId: event.user_id,
+        postGeminiQuery,
+      },
+      "[Pipeline] Cat2 post-Gemini query context",
+    );
 
     return {
       current_product: cat1Product,
