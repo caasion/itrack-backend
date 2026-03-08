@@ -1,6 +1,8 @@
 import { settings } from "../config/settings.js";
 import type { ProductCandidate, TasteProfile } from "../models/schemas.js";
 import type { GeminiSignals } from "./backboardService.js";
+import { uploadScreenshotForLens } from "./cloudinaryService.js";
+import { getJson } from "serpapi";
 
 type CatalogEntry = {
   name: string;
@@ -112,20 +114,6 @@ const profileAsSignals = (profile: TasteProfile): Partial<GeminiSignals> => ({
   estimated_price_range: profile.price_range,
 });
 
-const fetchWithTimeout = async (
-  url: string,
-  init: RequestInit,
-  timeoutMs: number,
-): Promise<Response> => {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
-};
-
 export const sourceViaHardcoded = async (
   signals?: Partial<GeminiSignals>,
 ): Promise<ProductCandidate[]> => {
@@ -139,28 +127,38 @@ export const sourceViaHardcoded = async (
 
 export const sourceCat1 = async (screenshotB64: string): Promise<ProductCandidate> => {
   if (settings.PRODUCT_SOURCING_MODE === "hardcoded") {
+    console.info("[Sourcing][Cat1] Hardcoded mode enabled; returning catalog fallback");
     return toProduct(HARDCODED_CATALOG[0], "hardcoded");
   }
 
-  try {
-    const response = await fetchWithTimeout(
-      "https://serpapi.com/search",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          engine: "google_lens",
-          api_key: settings.SERPAPI_KEY,
-          url: `data:image/jpeg;base64,${screenshotB64}`,
-        }),
-      },
-      10000,
-    );
+  let fallbackReason = "unknown";
 
-    if (response.ok) {
-      const data = (await response.json()) as { visual_matches?: Array<Record<string, unknown>> };
+  try {
+    const lensImageUrl = await uploadScreenshotForLens(screenshotB64);
+    if (!lensImageUrl) {
+      fallbackReason = settings.CLOUDINARY_ENABLED
+        ? "cloudinary_upload_failed"
+        : "cloudinary_disabled_no_public_image_url";
+      console.warn(
+        `[Sourcing][Cat1] Cannot run SerpAPI Lens without public image URL (reason=${fallbackReason}); falling back`,
+      );
+      throw new Error("Missing public image URL for SerpAPI Lens");
+    }
+
+    const data = (await getJson({
+      engine: "google_lens",
+      api_key: settings.SERPAPI_KEY,
+      url: lensImageUrl,
+      timeout: 30000,
+    })) as { visual_matches?: Array<Record<string, unknown>>; error?: string };
+
+    if (data.error) {
+      fallbackReason = "serpapi_error_response";
+      console.warn(`[Sourcing][Cat1] SerpAPI Lens returned error: ${data.error}; falling back`);
+    } else {
       const top = data.visual_matches?.[0];
       if (top) {
+        console.info("[Sourcing][Cat1] Live Lens hit from SerpAPI visual_matches[0]");
         return {
           name: typeof top.title === "string" ? top.title : "Unknown Product",
           price:
@@ -175,18 +173,31 @@ export const sourceCat1 = async (screenshotB64: string): Promise<ProductCandidat
           source: "serpapi_lens",
         };
       }
+
+      fallbackReason = "serpapi_ok_no_visual_match";
+      console.warn("[Sourcing][Cat1] SerpAPI responded but no visual match found; falling back");
     }
-  } catch {
-    // Fall back below.
+  } catch (error) {
+    const isTimeout = error instanceof Error && error.constructor.name === "RequestTimeoutError";
+    if (fallbackReason === "unknown") {
+      fallbackReason = isTimeout ? "serpapi_timeout" : "serpapi_request_error";
+    }
+    if (isTimeout) {
+      console.warn("[Sourcing][Cat1] SerpAPI Lens timed out after 30s; falling back");
+    } else {
+      console.warn("[Sourcing][Cat1] SerpAPI Lens request errored; falling back", error);
+    }
   }
 
+  console.warn(`[Sourcing][Cat1] Returning hardcoded fallback (reason=${fallbackReason})`);
   return toProduct(HARDCODED_CATALOG[0], "hardcoded");
 };
 
 export const sourceCat2 = async (profile: TasteProfile): Promise<ProductCandidate[]> => {
   const query = composeQueryFromProfile(profile);
 
-  if (settings.PRODUCT_SOURCING_MODE === "hardcoded" || !query) {
+  if (settings.PRODUCT_SOURCING_MODE === "hardcoded") {
+    console.info("[Sourcing][Cat2] Hardcoded mode enabled; returning catalog fallback picks");
     const scored = HARDCODED_CATALOG.map((candidate) => ({
       candidate,
       score: scoreCandidate(candidate, profileAsSignals(profile)),
@@ -194,35 +205,72 @@ export const sourceCat2 = async (profile: TasteProfile): Promise<ProductCandidat
     return scored.slice(0, 3).map(({ candidate }) => toProduct(candidate, "hardcoded"));
   }
 
-  try {
-    const response = await fetchWithTimeout(
-      `https://serpapi.com/search?engine=google_shopping&q=${encodeURIComponent(query)}&api_key=${encodeURIComponent(settings.SERPAPI_KEY)}`,
+  if (!query) {
+    console.warn(
+      "[Sourcing][Cat2] Empty query from profile; returning hardcoded fallback picks",
       {
-        method: "GET",
+        preferred_styles: profile.preferred_styles,
+        preferred_colors: profile.preferred_colors,
+        recent_interests: profile.recent_interests,
+        preferred_brands: profile.preferred_brands,
+        price_range: profile.price_range,
       },
-      10000,
     );
+    const scored = HARDCODED_CATALOG.map((candidate) => ({
+      candidate,
+      score: scoreCandidate(candidate, profileAsSignals(profile)),
+    })).sort((a, b) => b.score - a.score);
+    return scored.slice(0, 3).map(({ candidate }) => toProduct(candidate, "hardcoded"));
+  }
 
-    if (response.ok) {
-      const data = (await response.json()) as {
-        shopping_results?: Array<Record<string, unknown>>;
-      };
+  console.info(`[Sourcing][Cat2] Live shopping query: ${query}`);
+
+  let fallbackReason = "unknown";
+
+  try {
+    const data = (await getJson({
+      engine: "google_shopping",
+      q: query,
+      api_key: settings.SERPAPI_KEY,
+      timeout: 30000,
+    })) as { shopping_results?: Array<Record<string, unknown>>; error?: string };
+
+    if (data.error) {
+      fallbackReason = "serpapi_error_response";
+      console.warn(`[Sourcing][Cat2] SerpAPI Shopping returned error: ${data.error}; falling back`);
+    } else {
       const picks = (data.shopping_results ?? []).slice(0, 5).map((item) => ({
         name: typeof item.title === "string" ? item.title : "Unknown Product",
         price: typeof item.price === "string" ? item.price : "See site",
         image_url: typeof item.thumbnail === "string" ? item.thumbnail : "",
-        buy_url: typeof item.link === "string" ? item.link : "#",
+        buy_url:
+          typeof item.product_link === "string"
+            ? item.product_link
+            : typeof item.link === "string"
+              ? item.link
+              : "#",
         source: "serpapi_shopping" as const,
       }));
 
       if (picks.length > 0) {
+        console.info(`[Sourcing][Cat2] Live shopping hits: ${picks.length}`);
         return picks;
       }
+
+      fallbackReason = "serpapi_ok_no_shopping_results";
+      console.warn("[Sourcing][Cat2] SerpAPI responded but no shopping results found; falling back");
     }
-  } catch {
-    // Fall back below.
+  } catch (error) {
+    const isTimeout = error instanceof Error && error.constructor.name === "RequestTimeoutError";
+    fallbackReason = isTimeout ? "serpapi_timeout" : "serpapi_request_error";
+    if (isTimeout) {
+      console.warn("[Sourcing][Cat2] SerpAPI Shopping timed out after 30s; falling back");
+    } else {
+      console.warn("[Sourcing][Cat2] SerpAPI Shopping request errored; falling back", error);
+    }
   }
 
+  console.warn(`[Sourcing][Cat2] Returning hardcoded fallback picks (reason=${fallbackReason})`);
   const scored = HARDCODED_CATALOG.map((candidate) => ({
     candidate,
     score: scoreCandidate(candidate, profileAsSignals(profile)),
