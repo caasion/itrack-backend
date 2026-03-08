@@ -16,6 +16,7 @@ export const SettingsSchema = z.object({
     CLOUDINARY_CLOUD_NAME: z.string().min(1),
     CLOUDINARY_API_KEY: z.string().min(1),
     CLOUDINARY_API_SECRET: z.string().min(1),
+    CLOUDINARY_UPLOAD_PRESET: z.string().default(""),
     PRODUCT_SOURCING_MODE: z.enum(["serpapi", "hardcoded"]).default("hardcoded"),
     CLOUDINARY_ENABLED: stringToBoolFalseDefault,
     HOST: z.string().default("0.0.0.0"),

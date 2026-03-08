@@ -5,6 +5,7 @@ import { settings } from "./config/settings.js";
 import healthRoutes from "./routes/health.js";
 import dwellRoutes from "./routes/dwell.js";
 import profileRoutes from "./routes/profile.js";
+import runtimeRoutes from "./routes/runtime.js";
 
 const app = Fastify({
   logger: settings.DEBUG
@@ -26,6 +27,7 @@ await app.register(cors, { origin: "*" });
 await app.register(healthRoutes, { prefix: "/health" });
 await app.register(dwellRoutes, { prefix: "/dwell" });
 await app.register(profileRoutes, { prefix: "/profile" });
+await app.register(runtimeRoutes, { prefix: "/runtime" });
 
 try {
   await app.listen({
@@ -34,6 +36,18 @@ try {
   });
 
   app.log.info(`iTrack backend running - sourcing: ${settings.PRODUCT_SOURCING_MODE}`);
+  app.log.info(
+    {
+      cloudinary_enabled: settings.CLOUDINARY_ENABLED,
+      cloudinary_cloud_name_configured: Boolean(settings.CLOUDINARY_CLOUD_NAME),
+      cloudinary_upload_preset_configured: Boolean(settings.CLOUDINARY_UPLOAD_PRESET),
+      cloudinary_direct_upload_enabled:
+        settings.CLOUDINARY_ENABLED &&
+        Boolean(settings.CLOUDINARY_CLOUD_NAME) &&
+        Boolean(settings.CLOUDINARY_UPLOAD_PRESET),
+    },
+    "Cloudinary runtime config",
+  );
 } catch (error) {
   app.log.error(error, "Failed to start server");
   process.exit(1);

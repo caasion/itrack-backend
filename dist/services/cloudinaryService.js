@@ -55,3 +55,26 @@ export const transformProductImage = async (imageUrl) => {
         return imageUrl;
     }
 };
+export const uploadScreenshotForLens = async (screenshotB64) => {
+    if (!settings.CLOUDINARY_ENABLED) {
+        console.log("[Cloudinary] Disabled - cannot upload screenshot for Lens");
+        return null;
+    }
+    try {
+        const dataUri = `data:image/jpeg;base64,${screenshotB64}`;
+        const uploadResult = await cloudinary.uploader.upload(dataUri, {
+            folder: "itrack/lens-inputs",
+            resource_type: "image",
+            overwrite: false,
+        });
+        if (typeof uploadResult.secure_url === "string" && uploadResult.secure_url.length > 0) {
+            return uploadResult.secure_url;
+        }
+        console.warn("[Cloudinary] Screenshot uploaded but secure_url missing for Lens");
+        return null;
+    }
+    catch (error) {
+        console.warn("[Cloudinary] Screenshot upload for Lens failed", error);
+        return null;
+    }
+};

@@ -1,108 +1,40 @@
 import { settings } from "../config/settings.js";
+import { uploadScreenshotForLens } from "./cloudinaryService.js";
+import { getJson } from "serpapi";
 const HARDCODED_CATALOG = [
     {
         name: "Nike Air Force 1 '07",
-        price: "$110",
-        image_url: "https://static.nike.com/a/images/t_PDP_1280_v1/f_auto/af20ff4c-7aa2-4d68-b16e-a28a6c96aba8/air-force-1-07-shoes-WrLlWX.png",
-        buy_url: "https://www.nike.com/t/air-force-1-07-shoes",
+        price: "$115",
+        image_url: "https://images.unsplash.com/photo-1608231387042-66d1773070a5?q=80&w=1074&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D",
+        buy_url: "https://www.nike.com/t/air-force-1-07-mens-shoes-jBrhbr",
         tags: ["sneakers", "minimalist", "white", "streetwear", "nike"],
-    },
-    {
-        name: "Aritzia TNA Super Puff Jacket",
-        price: "$325",
-        image_url: "https://images.aritzia.com/media/catalog/product/cache/7/image/480x/9df78eab33525d08d6e5fb8d27136e95/a/r/ar_00000000000000000003388_s_a.jpg",
-        buy_url: "https://www.aritzia.com/en/product/super-puff-jacket",
-        tags: ["jacket", "minimalist", "black", "aritzia", "outerwear"],
-    },
-    {
-        name: "Carhartt WIP Chase Hoodie",
-        price: "$120",
-        image_url: "https://images.carhartt-wip.com/media/catalog/product/i/0/i026384_0c_01_fv.jpg",
-        buy_url: "https://www.carhartt-wip.com/en/sweatshirts/chase-hoodie",
-        tags: ["hoodie", "streetwear", "earth tones", "oversized", "carhartt"],
-    },
-    {
-        name: "Hydro Flask 32 oz Wide Mouth",
-        price: "$55",
-        image_url: "https://www.hydroflask.com/media/catalog/product/w/h/wh32bts001_a_1200x1200.jpg",
-        buy_url: "https://www.hydroflask.com/32-oz-wide-mouth",
-        tags: ["water bottle", "accessories", "black", "minimalist"],
-    },
-    {
-        name: "New Balance 990v5",
-        price: "$185",
-        image_url: "https://nb.scene7.com/is/image/NB/m990gl5_nb_02_i?$pdpflexf2$&qlt=80&fmt=webp&wid=440&hei=440",
-        buy_url: "https://www.newbalance.com/pd/made-in-usa-990v5",
-        tags: ["sneakers", "grey", "minimalist", "new balance", "dad shoes"],
     },
     {
         name: "Lululemon Everywhere Belt Bag",
         price: "$38",
-        image_url: "https://images.lululemon.com/is/image/lululemon/LU9AFBS_0001_1",
-        buy_url: "https://shop.lululemon.com/p/bags/Everywhere-Belt-Bag",
+        image_url: "https://images.lululemon.com/is/image/lululemon/LU9B78S_0001_1",
+        buy_url: "https://shop.lululemon.com/p/bags/Everywhere-Belt-Bag/_/prod8900747",
         tags: ["bag", "accessories", "black", "minimalist", "lululemon"],
-    },
-    {
-        name: "Arc'teryx Atom LT Hoody",
-        price: "$260",
-        image_url: "https://arcteryx.com/media/catalog/product/A/r/Atom-LT-Hoody-Mens-Black-24.jpg",
-        buy_url: "https://arcteryx.com/us/en/shop/mens/atom-lt-hoody",
-        tags: ["jacket", "minimalist", "black", "technical", "arcteryx"],
-    },
-    {
-        name: "Uniqlo Ultra Light Down Jacket",
-        price: "$70",
-        image_url: "https://image.uniqlo.com/UQ/ST3/us/imagesgoods/467870/item/usgoods_09_467870.jpg",
-        buy_url: "https://www.uniqlo.com/us/en/products/E467870-000",
-        tags: ["jacket", "minimalist", "packable", "affordable", "uniqlo"],
     },
     {
         name: "Adidas Samba OG",
         price: "$100",
-        image_url: "https://assets.adidas.com/images/h_840,f_auto,q_auto,fl_lossy,c_fill,g_auto/7ed0855435194229a525aad6009a0497_9366/Samba_OG_Shoes_White_B75806_01_standard.jpg",
-        buy_url: "https://www.adidas.com/us/samba-og-shoes",
+        image_url: "https://assets.adidas.com/images/h_840,f_auto,q_auto,fl_lossy,c_fill,g_auto/3bbecbdf584e40398446a8bf0117cf62_9366/Samba_OG_Shoes_White_B75806_01_standard.jpg",
+        buy_url: "https://www.adidas.com/us/samba-og-shoes/B75806.html",
         tags: ["sneakers", "white", "minimalist", "adidas", "retro"],
     },
     {
         name: "Patagonia Better Sweater Fleece",
         price: "$139",
-        image_url: "https://www.patagonia.com/dw/image/v2/BDJB_PRD/on/demandware.static/-/Sites-patagonia-master/default/dw5be1d9a0/images/hi-res/25528_BLK.jpg",
-        buy_url: "https://www.patagonia.com/product/mens-better-sweater-fleece-jacket",
+        image_url: "https://www.patagonia.ca/dw/image/v2/BDJB_PRD/on/demandware.static/-/Sites-patagonia-master/default/dw3e340922/images/hi-res/25882_GRBN.jpg?sw=512&sh=512&sfrm=png&q=95&bgcolor=f3f4ef",
+        buy_url: "https://www.patagonia.com/product/mens-better-sweater-fleece-jacket/25528.html",
         tags: ["fleece", "earth tones", "minimalist", "patagonia", "outdoor"],
     },
     {
-        name: "Ray-Ban Wayfarer Classic",
-        price: "$163",
-        image_url: "https://www.ray-ban.com/media/catalog/product/R/B/RB2140__901_58__P21.png",
-        buy_url: "https://www.ray-ban.com/usa/sunglasses/RB2140%20UNISEX%20004-wayfarer",
-        tags: ["sunglasses", "accessories", "black", "classic", "ray-ban"],
-    },
-    {
-        name: "Supreme Box Logo Tee",
-        price: "$44",
-        image_url: "https://via.placeholder.com/400x400/FF0000/FFFFFF?text=Supreme+Tee",
-        buy_url: "https://www.supremenewyork.com",
-        tags: ["t-shirt", "streetwear", "supreme", "graphic"],
-    },
-    {
-        name: "Stanley Quencher 40 oz",
-        price: "$45",
-        image_url: "https://www.stanley1913.com/cdn/shop/files/SS-10-09849-001-The-Quencher-H2.0-FlowState-Tumbler-40OZ-Cream_3f7b9c4a-2c2a-4db3-8f73-03b7ea6b3b9f.jpg",
-        buy_url: "https://www.stanley1913.com/products/the-quencher-h2-0-flowstate-tumbler-40-oz",
-        tags: ["water bottle", "accessories", "cream", "trending"],
-    },
-    {
-        name: "Zara Oversized Blazer",
-        price: "$90",
-        image_url: "https://static.zara.net/photos///2023/V/0/2/p/2718/272/712/2/w/750/2718272712_1_1_1.jpg",
-        buy_url: "https://www.zara.com/us/en/oversized-blazer",
-        tags: ["blazer", "minimalist", "earth tones", "oversized", "zara"],
-    },
-    {
         name: "Dr. Martens 1460 Boots",
-        price: "$150",
-        image_url: "https://i1.adis.ws/i/drmartens/10072004.90.jpg",
-        buy_url: "https://www.drmartens.com/us/en/1460-smooth-leather-lace-up-boots",
+        price: "$170",
+        image_url: "https://i1.adis.ws/i/drmartens/11822006.80.jpg",
+        buy_url: "https://www.drmartens.com/us/en/1460-smooth-leather-lace-up-boots-black/p/11822006",
         tags: ["boots", "black", "streetwear", "dr martens", "chunky"],
     },
 ];
@@ -150,16 +82,6 @@ const profileAsSignals = (profile) => ({
     product_category: profile.recent_interests[0],
     estimated_price_range: profile.price_range,
 });
-const fetchWithTimeout = async (url, init, timeoutMs) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-        return await fetch(url, { ...init, signal: controller.signal });
-    }
-    finally {
-        clearTimeout(timeout);
-    }
-};
 export const sourceViaHardcoded = async (signals) => {
     const scored = HARDCODED_CATALOG.map((candidate) => ({
         candidate,
@@ -167,24 +89,39 @@ export const sourceViaHardcoded = async (signals) => {
     })).sort((a, b) => b.score - a.score);
     return scored.slice(0, 5).map(({ candidate }) => toProduct(candidate, "hardcoded"));
 };
-export const sourceCat1 = async (screenshotB64) => {
+export const sourceCat1 = async (screenshotB64, screenshotUrl) => {
     if (settings.PRODUCT_SOURCING_MODE === "hardcoded") {
+        console.info("[Sourcing][Cat1] Hardcoded mode enabled; returning catalog fallback");
         return toProduct(HARDCODED_CATALOG[0], "hardcoded");
     }
+    let fallbackReason = "unknown";
     try {
-        const response = await fetchWithTimeout("https://serpapi.com/search", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                engine: "google_lens",
-                api_key: settings.SERPAPI_KEY,
-                url: `data:image/jpeg;base64,${screenshotB64}`,
-            }),
-        }, 10000);
-        if (response.ok) {
-            const data = (await response.json());
+        const providedUrl = screenshotUrl?.trim();
+        const lensImageUrl = providedUrl ? providedUrl : await uploadScreenshotForLens(screenshotB64);
+        if (providedUrl) {
+            console.info("[Sourcing][Cat1] Using frontend-provided screenshot_url for Lens");
+        }
+        if (!lensImageUrl) {
+            fallbackReason = settings.CLOUDINARY_ENABLED
+                ? "cloudinary_upload_failed"
+                : "cloudinary_disabled_no_public_image_url";
+            console.warn(`[Sourcing][Cat1] Cannot run SerpAPI Lens without public image URL (reason=${fallbackReason}); falling back`);
+            throw new Error("Missing public image URL for SerpAPI Lens");
+        }
+        const data = (await getJson({
+            engine: "google_lens",
+            api_key: settings.SERPAPI_KEY,
+            url: lensImageUrl,
+            timeout: 30000,
+        }));
+        if (data.error) {
+            fallbackReason = "serpapi_error_response";
+            console.warn(`[Sourcing][Cat1] SerpAPI Lens returned error: ${data.error}; falling back`);
+        }
+        else {
             const top = data.visual_matches?.[0];
             if (top) {
+                console.info("[Sourcing][Cat1] Live Lens hit from SerpAPI visual_matches[0]");
                 return {
                     name: typeof top.title === "string" ? top.title : "Unknown Product",
                     price: typeof top.price === "object" &&
@@ -198,43 +135,93 @@ export const sourceCat1 = async (screenshotB64) => {
                     source: "serpapi_lens",
                 };
             }
+            fallbackReason = "serpapi_ok_no_visual_match";
+            console.warn("[Sourcing][Cat1] SerpAPI responded but no visual match found; falling back");
         }
     }
-    catch {
-        // Fall back below.
+    catch (error) {
+        const isTimeout = error instanceof Error && error.constructor.name === "RequestTimeoutError";
+        if (fallbackReason === "unknown") {
+            fallbackReason = isTimeout ? "serpapi_timeout" : "serpapi_request_error";
+        }
+        if (isTimeout) {
+            console.warn("[Sourcing][Cat1] SerpAPI Lens timed out after 30s; falling back");
+        }
+        else {
+            console.warn("[Sourcing][Cat1] SerpAPI Lens request errored; falling back", error);
+        }
     }
+    console.warn(`[Sourcing][Cat1] Returning hardcoded fallback (reason=${fallbackReason})`);
     return toProduct(HARDCODED_CATALOG[0], "hardcoded");
 };
 export const sourceCat2 = async (profile) => {
     const query = composeQueryFromProfile(profile);
-    if (settings.PRODUCT_SOURCING_MODE === "hardcoded" || !query) {
+    if (settings.PRODUCT_SOURCING_MODE === "hardcoded") {
+        console.info("[Sourcing][Cat2] Hardcoded mode enabled; returning catalog fallback picks");
         const scored = HARDCODED_CATALOG.map((candidate) => ({
             candidate,
             score: scoreCandidate(candidate, profileAsSignals(profile)),
         })).sort((a, b) => b.score - a.score);
         return scored.slice(0, 3).map(({ candidate }) => toProduct(candidate, "hardcoded"));
     }
+    if (!query) {
+        console.warn("[Sourcing][Cat2] Empty query from profile; returning hardcoded fallback picks", {
+            preferred_styles: profile.preferred_styles,
+            preferred_colors: profile.preferred_colors,
+            recent_interests: profile.recent_interests,
+            preferred_brands: profile.preferred_brands,
+            price_range: profile.price_range,
+        });
+        const scored = HARDCODED_CATALOG.map((candidate) => ({
+            candidate,
+            score: scoreCandidate(candidate, profileAsSignals(profile)),
+        })).sort((a, b) => b.score - a.score);
+        return scored.slice(0, 3).map(({ candidate }) => toProduct(candidate, "hardcoded"));
+    }
+    console.info(`[Sourcing][Cat2] Live shopping query: ${query}`);
+    let fallbackReason = "unknown";
     try {
-        const response = await fetchWithTimeout(`https://serpapi.com/search?engine=google_shopping&q=${encodeURIComponent(query)}&api_key=${encodeURIComponent(settings.SERPAPI_KEY)}`, {
-            method: "GET",
-        }, 10000);
-        if (response.ok) {
-            const data = (await response.json());
+        const data = (await getJson({
+            engine: "google_shopping",
+            q: query,
+            api_key: settings.SERPAPI_KEY,
+            timeout: 30000,
+        }));
+        if (data.error) {
+            fallbackReason = "serpapi_error_response";
+            console.warn(`[Sourcing][Cat2] SerpAPI Shopping returned error: ${data.error}; falling back`);
+        }
+        else {
             const picks = (data.shopping_results ?? []).slice(0, 5).map((item) => ({
                 name: typeof item.title === "string" ? item.title : "Unknown Product",
                 price: typeof item.price === "string" ? item.price : "See site",
                 image_url: typeof item.thumbnail === "string" ? item.thumbnail : "",
-                buy_url: typeof item.link === "string" ? item.link : "#",
+                buy_url: typeof item.product_link === "string"
+                    ? item.product_link
+                    : typeof item.link === "string"
+                        ? item.link
+                        : "#",
                 source: "serpapi_shopping",
             }));
             if (picks.length > 0) {
+                console.info(`[Sourcing][Cat2] Live shopping hits: ${picks.length}`);
                 return picks;
             }
+            fallbackReason = "serpapi_ok_no_shopping_results";
+            console.warn("[Sourcing][Cat2] SerpAPI responded but no shopping results found; falling back");
         }
     }
-    catch {
-        // Fall back below.
+    catch (error) {
+        const isTimeout = error instanceof Error && error.constructor.name === "RequestTimeoutError";
+        fallbackReason = isTimeout ? "serpapi_timeout" : "serpapi_request_error";
+        if (isTimeout) {
+            console.warn("[Sourcing][Cat2] SerpAPI Shopping timed out after 30s; falling back");
+        }
+        else {
+            console.warn("[Sourcing][Cat2] SerpAPI Shopping request errored; falling back", error);
+        }
     }
+    console.warn(`[Sourcing][Cat2] Returning hardcoded fallback picks (reason=${fallbackReason})`);
     const scored = HARDCODED_CATALOG.map((candidate) => ({
         candidate,
         score: scoreCandidate(candidate, profileAsSignals(profile)),

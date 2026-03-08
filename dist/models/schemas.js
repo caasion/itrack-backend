@@ -2,6 +2,8 @@ import { z } from "zod";
 export const DwellEventSchema = z.object({
     user_id: z.string(),
     screenshot_b64: z.string(),
+    screenshot_url: z.string().url().optional(),
+    screenshot_public_id: z.string().optional(),
     page_url: z.string().url(),
     page_title: z.string().optional(),
     dwell_duration_ms: z.number().int().min(0),

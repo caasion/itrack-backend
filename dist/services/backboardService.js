@@ -56,7 +56,13 @@ export const getProfile = async (userId) => {
     finally {
         clearTimeout(timeout);
     }
-    const empty = TasteProfileSchema.parse({});
+    const empty = TasteProfileSchema.parse({
+        preferred_styles: ["minimalist", "streetwear"],
+        preferred_colors: ["black", "white"],
+        recent_interests: ["sneakers", "outerwear"],
+        preferred_brands: [],
+        price_range: "$50-$200",
+    });
     profileCache.set(userId, empty);
     return empty;
 };
@@ -92,7 +98,16 @@ export const updateProfile = async (userId, signals) => {
         });
     }
     catch (error) {
-        console.warn("[Backboard] updateProfile write failed", error);
+        const isNetworkError = error instanceof TypeError &&
+            typeof error.cause?.code === "string" &&
+            ["ENOTFOUND", "ECONNREFUSED", "ECONNRESET"].includes(error.cause.code);
+        if (isNetworkError) {
+            const code = error.cause.code;
+            console.warn(`[Backboard] Cannot reach ${settings.BACKBOARD_BASE_URL} (${code}) — profile saved in-memory only. Check BACKBOARD_BASE_URL in your .env.`);
+        }
+        else {
+            console.warn("[Backboard] updateProfile write failed", error);
+        }
     }
     finally {
         clearTimeout(timeout);
