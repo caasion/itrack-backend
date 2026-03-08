@@ -24,18 +24,17 @@ export const transformProductImage = async (imageUrl: string): Promise<string> =
     });
     publicId = uploadResult.public_id;
 
-    const animatedUrl = cloudinary.url(publicId, {
-      resource_type: "video",
+    const transformedUrl = cloudinary.url(publicId, {
+      resource_type: "image",
       transformation: [
-        { effect: "zoompan:1.2:3" },
-        { effect: "loop" },
-        { effect: "background_removal" },
-        { width: 600, height: 800, crop: "fill", gravity: "auto" },
-        { quality: "auto", fetch_format: "auto" },
+        { width: 288, height: 224, crop: "fit" },
+        { effect: "sharpen" },
+        { effect: "improve", value: "outdoor:50" },
+        { quality: "auto:best", fetch_format: "auto" },
       ],
     });
 
-    return animatedUrl;
+    return transformedUrl;
   } catch {
     // Fall through to fallback path.
   }
@@ -50,10 +49,12 @@ export const transformProductImage = async (imageUrl: string): Promise<string> =
     }
 
     const fallbackUrl = cloudinary.url(publicId, {
+      resource_type: "image",
       transformation: [
-        { effect: "background_removal" },
-        { width: 600, height: 800, crop: "fill", gravity: "auto" },
-        { quality: "auto", fetch_format: "auto" },
+        { width: 288, height: 224, crop: "fit" },
+        { effect: "sharpen" },
+        { effect: "improve", value: "outdoor:50" },
+        { quality: "auto:best", fetch_format: "auto" },
       ],
     });
 
