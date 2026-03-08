@@ -78,7 +78,13 @@ export const getProfile = async (userId: string): Promise<TasteProfile> => {
     clearTimeout(timeout);
   }
 
-  const empty = TasteProfileSchema.parse({});
+  const empty = TasteProfileSchema.parse({
+    preferred_styles: ["minimalist", "streetwear"],
+    preferred_colors: ["black", "white"],
+    recent_interests: ["sneakers", "outerwear"],
+    preferred_brands: [],
+    price_range: "$50-$200",
+  });
   profileCache.set(userId, empty);
   return empty;
 };
