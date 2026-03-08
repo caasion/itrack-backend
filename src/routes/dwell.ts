@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from "fastify";
 
+import { settings } from "../config/settings.js";
 import { DwellEventSchema } from "../models/schemas.js";
 import type { ProductCandidate } from "../models/schemas.js";
 import * as backboardService from "../services/backboardService.js";
@@ -34,16 +35,19 @@ const dwellRoutes: FastifyPluginAsync = async (fastify) => {
     );
 
     fastify.log.info("[Pipeline] Running Cat1, Cat2, and Gemini concurrently");
-    const cat1Task = sourcingService.sourceCat1(event.screenshot_b64);
+    const cat1Task = sourcingService.sourceCat1(event.screenshot_b64, event.screenshot_url);
     const cat2Task = sourcingService.sourceCat2(currentProfile).catch((error: unknown) => {
       fastify.log.warn({ err: error }, "[Pipeline] Cat2 sourcing failed, using empty picks");
       return [];
     });
-    const geminiTask = geminiService
-      .identifyAndUpdate(event.screenshot_b64, event.user_id, event.page_url, event.page_title)
-      .catch((error: unknown) => {
-        fastify.log.warn({ err: error }, "[Pipeline] Gemini identify/update failed");
-      });
+    const geminiTask =
+      settings.PRODUCT_SOURCING_MODE === "hardcoded"
+        ? Promise.resolve()
+        : geminiService
+            .identifyAndUpdate(event.screenshot_b64, event.user_id, event.page_url, event.page_title)
+            .catch((error: unknown) => {
+              fastify.log.warn({ err: error }, "[Pipeline] Gemini identify/update failed");
+            });
 
     let cat1Product: ProductCandidate;
     let cat2Picks: ProductCandidate[];

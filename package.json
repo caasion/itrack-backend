@@ -6,7 +6,8 @@
     "dev": "tsx watch src/main.ts",
     "build": "tsc",
     "start": "node dist/main.js",
-    "test:dwell": "node scripts/test-dwell-workflow.mjs"
+    "test:dwell": "node scripts/test-dwell-workflow.mjs",
+    "test:local": "powershell -ExecutionPolicy Bypass -File scripts/test-local.ps1"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",

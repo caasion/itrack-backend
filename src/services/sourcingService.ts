@@ -125,7 +125,10 @@ export const sourceViaHardcoded = async (
   return scored.slice(0, 5).map(({ candidate }) => toProduct(candidate, "hardcoded"));
 };
 
-export const sourceCat1 = async (screenshotB64: string): Promise<ProductCandidate> => {
+export const sourceCat1 = async (
+  screenshotB64: string,
+  screenshotUrl?: string,
+): Promise<ProductCandidate> => {
   if (settings.PRODUCT_SOURCING_MODE === "hardcoded") {
     console.info("[Sourcing][Cat1] Hardcoded mode enabled; returning catalog fallback");
     return toProduct(HARDCODED_CATALOG[0], "hardcoded");
@@ -134,7 +137,11 @@ export const sourceCat1 = async (screenshotB64: string): Promise<ProductCandidat
   let fallbackReason = "unknown";
 
   try {
-    const lensImageUrl = await uploadScreenshotForLens(screenshotB64);
+    const providedUrl = screenshotUrl?.trim();
+    const lensImageUrl = providedUrl ? providedUrl : await uploadScreenshotForLens(screenshotB64);
+    if (providedUrl) {
+      console.info("[Sourcing][Cat1] Using frontend-provided screenshot_url for Lens");
+    }
     if (!lensImageUrl) {
       fallbackReason = settings.CLOUDINARY_ENABLED
         ? "cloudinary_upload_failed"
