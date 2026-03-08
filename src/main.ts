@@ -7,7 +7,19 @@ import dwellRoutes from "./routes/dwell.js";
 import profileRoutes from "./routes/profile.js";
 
 const app = Fastify({
-  logger: settings.DEBUG,
+  logger: settings.DEBUG
+    ? {
+        transport: {
+          target: "pino-pretty",
+          options: {
+            colorize: true,
+            translateTime: "HH:MM:ss",
+            ignore: "pid,hostname",
+            messageFormat: "{msg}",
+          },
+        },
+      }
+    : true,
 });
 
 await app.register(cors, { origin: "*" });

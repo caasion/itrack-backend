@@ -128,7 +128,20 @@ export const updateProfile = async (
       signal: controller.signal,
     });
   } catch (error) {
-    console.warn("[Backboard] updateProfile write failed", error);
+    const isNetworkError =
+      error instanceof TypeError &&
+      typeof (error as { cause?: { code?: unknown } }).cause?.code === "string" &&
+      ["ENOTFOUND", "ECONNREFUSED", "ECONNRESET"].includes(
+        (error as { cause: { code: string } }).cause.code,
+      );
+    if (isNetworkError) {
+      const code = (error as { cause: { code: string } }).cause.code;
+      console.warn(
+        `[Backboard] Cannot reach ${settings.BACKBOARD_BASE_URL} (${code}) — profile saved in-memory only. Check BACKBOARD_BASE_URL in your .env.`,
+      );
+    } else {
+      console.warn("[Backboard] updateProfile write failed", error);
+    }
   } finally {
     clearTimeout(timeout);
   }
