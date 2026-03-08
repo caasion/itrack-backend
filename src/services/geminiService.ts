@@ -7,11 +7,7 @@ import type { GeminiSignals } from "./backboardService.js";
 
 const genAI = new GoogleGenerativeAI(settings.GEMINI_API_KEY);
 const MODEL_CANDIDATES = [
-  "gemini-1.5-flash",
-  "gemini-1.5-flash-latest",
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
-  "gemini-2.0-flash-exp",
+  "gemini-2.5-flash"
 ];
 
 let selectedModelName: string | undefined;
@@ -34,12 +30,31 @@ const FALLBACK_SIGNALS: GeminiSignals = {
   brand_guess: "unknown",
 };
 
-const IDENTIFY_PROMPT = `You are analyzing a screenshot from a social media feed (Instagram or TikTok).
-Identify the primary product visible and extract taste signals.
-Respond ONLY with valid JSON - no markdown, no explanation.
+const IDENTIFY_PROMPT = `You are a shopping assistant analyzing a screenshot from social media (Instagram or TikTok).
+
+Your task: identify the PRIMARY PHYSICAL PRODUCT that a viewer would most likely want to purchase after seeing this post.
+
+Focus on products like:
+- Tools, gadgets, or devices being used or demonstrated (e.g. a milk frother, camera, blender)
+- Clothing, shoes, or accessories being worn
+- Home goods, furniture, or décor being featured
+- Beauty or personal care products being applied
+
+Do NOT identify:
+- Food or drinks being prepared or consumed — instead identify the TOOL being used to make them
+- Abstract moods, activities, or settings
+- The background or non-product elements
+
+For style_signals and color_signals, extract short clean adjectives that describe the product's aesthetic (e.g. "minimalist", "matte black", "retro"). Do NOT include parenthetical explanations like "(frother)" or "(drink)" — just the adjective itself.
+
+Respond ONLY with valid JSON, no markdown, no explanation:
 {
-  product_name, product_category, style_signals, color_signals,
-  estimated_price_range, brand_guess
+"product_name": string,
+  "product_category": string,
+  "style_signals": string[],
+  "color_signals": string[],
+  "estimated_price_range": string,
+  "brand_guess": string
 }
 Page URL: {pageUrl}
 Page title: {pageTitle}`;
